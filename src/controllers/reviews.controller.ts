@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { AppError } from "../utils/AppError";
 
@@ -14,7 +13,7 @@ const reviewSchema = z.object({
 // this is the one place that's allowed to write ratingAvg/reviewCount.
 // Never increment/decrement those fields by hand elsewhere; averages
 // don't compose with +1/-1 the way counts do.
-async function recomputePlaceRating(tx: Prisma.TransactionClient, placeId: string) {
+async function recomputePlaceRating(tx: any, placeId: string) {
   const agg = await tx.review.aggregate({
     where: { placeId },
     _avg: { rating: true },
@@ -40,7 +39,7 @@ export async function upsertReview(req: Request, res: Response) {
   const place = await prisma.place.findUnique({ where: { id: data.placeId }, select: { id: true } });
   if (!place) throw new AppError("Place not found", 404);
 
-  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  await prisma.$transaction(async (tx: any) => {
     await tx.review.upsert({
       where: { placeId_userId: { placeId: data.placeId, userId } },
       create: { placeId: data.placeId, userId, rating: data.rating, comment: data.comment },
@@ -61,7 +60,7 @@ export async function deleteReview(req: Request, res: Response) {
   });
   if (!existing) throw new AppError("Review not found", 404);
 
-  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  await prisma.$transaction(async (tx: any) => {
     await tx.review.delete({ where: { id: existing.id } });
     await recomputePlaceRating(tx, placeId);
   });
