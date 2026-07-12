@@ -40,7 +40,7 @@ export async function upsertReview(req: Request, res: Response) {
   const place = await prisma.place.findUnique({ where: { id: data.placeId }, select: { id: true } });
   if (!place) throw new AppError("Place not found", 404);
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.review.upsert({
       where: { placeId_userId: { placeId: data.placeId, userId } },
       create: { placeId: data.placeId, userId, rating: data.rating, comment: data.comment },
@@ -61,7 +61,7 @@ export async function deleteReview(req: Request, res: Response) {
   });
   if (!existing) throw new AppError("Review not found", 404);
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.review.delete({ where: { id: existing.id } });
     await recomputePlaceRating(tx, placeId);
   });

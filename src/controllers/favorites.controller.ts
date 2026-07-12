@@ -16,7 +16,7 @@ export async function listMyFavorites(req: Request, res: Response) {
     },
   });
 
-  res.json({ items: favorites.map((f) => f.place) });
+  res.json({ items: favorites.map((f: { place: unknown }) => f.place) });
 }
 
 // One endpoint, toggles either way — simpler client code than separate

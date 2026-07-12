@@ -1,5 +1,4 @@
 import { NextFunction, Request, Response } from "express";
-import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { AppError } from "../utils/AppError";
 
@@ -23,11 +22,15 @@ export function errorHandler(
     });
   }
 
-  if (err instanceof Prisma.PrismaClientKnownRequestError) {
-    if (err.code === "P2002") {
+  // Prisma throws a runtime error object with a `code` property for known errors.
+  // Narrow `err` safely and check the code string rather than relying on
+  // `instanceof` against generated Prisma types (which may not exist at runtime).
+  if (typeof err === "object" && err !== null && "code" in err) {
+    const pErr = err as { code?: string };
+    if (pErr.code === "P2002") {
       return res.status(409).json({ error: "A record with that value already exists" });
     }
-    if (err.code === "P2025") {
+    if (pErr.code === "P2025") {
       return res.status(404).json({ error: "Record not found" });
     }
   }
