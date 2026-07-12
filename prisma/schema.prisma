@@ -1,0 +1,236 @@
+// ============================================================
+// Huye Finds — Prisma schema
+// Postgres (Neon), designed for Next.js + TypeScript + Tailwind
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled connection (pgbouncer) — used by the app at runtime.
+  url       = env("DATABASE_URL")
+  // Direct connection — required by Prisma Migrate (migrations can't
+  // run through Neon's pooler reliably). Neon gives you both URLs
+  // on the same project dashboard.
+  directUrl = env("DIRECT_URL")
+}
+
+// ------------------------------------------------------------
+// Enums
+// ------------------------------------------------------------
+
+enum Role {
+  STUDENT
+  OWNER   // manages one or more places — not used yet, but the
+          // Place.ownerId FK needs somewhere to point once you
+          // build business accounts
+  ADMIN
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+// ------------------------------------------------------------
+// Users
+// ------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(STUDENT)
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // A user can own places (once business accounts exist)
+  ownedPlaces Place[]    @relation("PlaceOwner")
+  reviews     Review[]
+  favorites   Favorite[]
+
+  @@index([email])
+}
+
+// ------------------------------------------------------------
+// Categories
+// ------------------------------------------------------------
+// Deliberately a table, not an enum — you WILL add categories
+// (stationery, salons, laundry...) after launch, and an enum
+// migration for that is more painful than it needs to be.
+
+model Category {
+  id        String   @id @default(cuid())
+  name      String   @unique          // "Restaurants"
+  slug      String   @unique          // "restaurants"
+  icon      String                    // key your frontend maps to an SVG, e.g. "plate"
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  places Place[]
+}
+
+// ------------------------------------------------------------
+// Places
+// ------------------------------------------------------------
+
+model Place {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String  @db.Text
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  ownerId String?
+  owner   User?   @relation("PlaceOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  // Price range in RWF. RWF has no minor currency unit in practice,
+  // so plain Int is correct here — do not use Float for money.
+  priceMin Int
+  priceMax Int
+
+  contactPhone  String
+  contactPhone2 String?
+
+  // Free-text landmark description, since there's no map integration yet.
+  // lat/lng kept nullable so a future map feature doesn't need a
+  // structural migration — just backfill.
+  landmark  String
+  latitude  Decimal? @db.Decimal(9, 6)
+  longitude Decimal? @db.Decimal(9, 6)
+
+  isActive   Boolean @default(true)
+  isFeatured Boolean @default(false)
+
+  // Denormalized aggregates — trade write-complexity for cheap reads.
+  // Recompute in the same transaction whenever a Review is
+  // created/updated/deleted (see note at bottom of file). Never trust
+  // these as source of truth for anything requiring accuracy (e.g. a
+  // "top rated" leaderboard should recompute from Review directly).
+  ratingAvg    Decimal @default(0) @db.Decimal(2, 1)
+  reviewCount  Int     @default(0)
+  favoriteCount Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  images    PlaceImage[]
+  menuItems MenuItem[]
+  hours     BusinessHour[]
+  reviews   Review[]
+  favorites Favorite[]
+
+  @@index([categoryId])
+  @@index([isActive, isFeatured])
+  @@index([slug])
+}
+
+model PlaceImage {
+  id        String  @id @default(cuid())
+  placeId   String
+  place     Place   @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  url       String
+  altText   String
+  isCover   Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  @@index([placeId])
+}
+
+model MenuItem {
+  id        String  @id @default(cuid())
+  placeId   String
+  place     Place   @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  name      String
+  price     Int
+  note      String?
+  sortOrder Int     @default(0)
+
+  @@index([placeId])
+}
+
+model BusinessHour {
+  id        String    @id @default(cuid())
+  placeId   String
+  place     Place     @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  dayOfWeek DayOfWeek
+  openTime  String?   // "07:00" — stored as string on purpose: these are
+  closeTime String?   // display hours, not used in date math anywhere yet.
+  isClosed  Boolean   @default(false)
+
+  @@unique([placeId, dayOfWeek])
+  @@index([placeId])
+}
+
+// ------------------------------------------------------------
+// Reviews & Favorites
+// ------------------------------------------------------------
+
+model Review {
+  id        String   @id @default(cuid())
+  placeId   String
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rating    Int      // enforce 1–5 at the application layer; Postgres
+                      // CHECK constraints aren't modeled by Prisma yet
+  comment   String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One review per student per place — resubmitting should be an
+  // update, not a new row.
+  @@unique([placeId, userId])
+  @@index([placeId])
+}
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  placeId   String
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, placeId])
+  @@index([placeId])
+}
+
+// ------------------------------------------------------------
+// Housing (scaffolded for the roadmap — not wired to the UI yet)
+// ------------------------------------------------------------
+
+model HousingListing {
+  id          String   @id @default(cuid())
+  title       String
+  description String   @db.Text
+  priceMonth  Int
+  landmark    String
+  contactPhone String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  images HousingImage[]
+
+  @@index([isActive])
+}
+
+model HousingImage {
+  id        String         @id @default(cuid())
+  listingId String
+  listing   HousingListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  url       String
+  sortOrder Int            @default(0)
+}
