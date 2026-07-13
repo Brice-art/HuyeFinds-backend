@@ -8,7 +8,7 @@ export async function listCategories(_req: Request, res: Response) {
   });
 
   res.json({
-    items: categories.map((c: { id: string; name: string; slug: string; icon: string | null; _count: { places: number } }) => ({
+    items: categories.map((c) => ({
       id: c.id,
       name: c.name,
       slug: c.slug,

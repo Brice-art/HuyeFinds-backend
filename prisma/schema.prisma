@@ -4,12 +4,17 @@
 // ============================================================
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
+  // Pooled connection (pgbouncer) — used by the app at runtime.
+  url       = env("DATABASE_URL")
+  // Direct connection — required by Prisma Migrate (migrations can't
+  // run through Neon's pooler reliably). Neon gives you both URLs
+  // on the same project dashboard.
+  directUrl = env("DIRECT_URL")
 }
 
 // ------------------------------------------------------------
