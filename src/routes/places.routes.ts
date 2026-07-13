@@ -10,7 +10,7 @@ import { attachUserIfPresent, requireAuth, requireRole } from "../middleware/aut
 
 export const placesRouter = Router();
 
-placesRouter.get("/", asyncHandler(listPlaces));
+placesRouter.get("/", attachUserIfPresent, asyncHandler(listPlaces));
 placesRouter.get("/:slug", attachUserIfPresent, asyncHandler(getPlaceBySlug));
-placesRouter.get("/:slug/similar", asyncHandler(getSimilarPlaces));
+placesRouter.get("/:slug/similar", attachUserIfPresent, asyncHandler(getSimilarPlaces));
 placesRouter.post("/", requireAuth, requireRole("OWNER", "ADMIN"), asyncHandler(createPlace));

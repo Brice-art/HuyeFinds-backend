@@ -53,8 +53,22 @@ export async function listPlaces(req: Request, res: Response) {
     prisma.place.count({ where }),
   ]);
 
+  let favoriteMap = new Map<string, boolean>();
+  if (req.user && items.length > 0) {
+    const favorites = await prisma.favorite.findMany({
+      where: { userId: req.user.userId, placeId: { in: items.map((p) => p.id) } },
+      select: { placeId: true },
+    });
+    favoriteMap = new Map(favorites.map((favorite) => [favorite.placeId, true]));
+  }
+
+  const itemsWithFavorite = items.map((place) => ({
+    ...place,
+    isFavorited: !!favoriteMap.get(place.id),
+  }));
+
   res.json({
-    items,
+    items: itemsWithFavorite,
     pagination: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) },
   });
 }
@@ -112,10 +126,27 @@ export async function getSimilarPlaces(req: Request, res: Response) {
     where: { categoryId: place.categoryId, isActive: true, id: { not: place.id } },
     take: 4,
     orderBy: { ratingAvg: "desc" },
-    include: { images: { where: { isCover: true }, take: 1 } },
+    include: {
+      category: { select: { name: true, slug: true, icon: true } },
+      images: { where: { isCover: true }, take: 1 },
+    },
   });
 
-  res.json({ items: similar });
+  let favoriteMap = new Map<string, boolean>();
+  if (req.user && similar.length > 0) {
+    const favorites = await prisma.favorite.findMany({
+      where: { userId: req.user.userId, placeId: { in: similar.map((p) => p.id) } },
+      select: { placeId: true },
+    });
+    favoriteMap = new Map(favorites.map((favorite) => [favorite.placeId, true]));
+  }
+
+  const similarWithFavorite = similar.map((place) => ({
+    ...place,
+    isFavorited: !!favoriteMap.get(place.id),
+  }));
+
+  res.json({ items: similarWithFavorite });
 }
 
 // ------------------------------------------------------------
