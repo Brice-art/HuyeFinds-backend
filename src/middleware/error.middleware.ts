@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { AppError } from "../utils/AppError";
+import { MulterError } from "multer";
 
 export function notFoundHandler(req: Request, res: Response) {
   res.status(404).json({ error: `No route: ${req.method} ${req.originalUrl}` });
@@ -35,6 +36,14 @@ export function errorHandler(
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({ error: err.message });
   }
+
+   // ...
+   if (err instanceof MulterError) {
+     if (err.code === "LIMIT_FILE_SIZE") {
+       return res.status(400).json({ error: "Image must be smaller than 5MB" });
+     }
+     return res.status(400).json({ error: err.message });
+   }
 
   // Anything unrecognized is a bug, not user error — log the real thing
   // server-side, never leak stack traces or Prisma internals to the client.
