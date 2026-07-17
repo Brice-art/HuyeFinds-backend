@@ -53,8 +53,22 @@ export async function listPlaces(req: Request, res: Response) {
     prisma.place.count({ where }),
   ]);
 
+  let favoriteMap = new Map<string, boolean>();
+  if (req.user && items.length > 0) {
+    const favorites = await prisma.favorite.findMany({
+      where: { userId: req.user.userId, placeId: { in: items.map((p) => p.id) } },
+      select: { placeId: true },
+    });
+    favoriteMap = new Map(favorites.map((favorite) => [favorite.placeId, true]));
+  }
+
+  const itemsWithFavorite = items.map((place) => ({
+    ...place,
+    isFavorited: !!favoriteMap.get(place.id),
+  }));
+
   res.json({
-    items,
+    items: itemsWithFavorite,
     pagination: { page: q.page, limit: q.limit, total, totalPages: Math.ceil(total / q.limit) },
   });
 }
@@ -112,10 +126,27 @@ export async function getSimilarPlaces(req: Request, res: Response) {
     where: { categoryId: place.categoryId, isActive: true, id: { not: place.id } },
     take: 4,
     orderBy: { ratingAvg: "desc" },
-    include: { images: { where: { isCover: true }, take: 1 } },
+    include: {
+      category: { select: { name: true, slug: true, icon: true } },
+      images: { where: { isCover: true }, take: 1 },
+    },
   });
 
-  res.json({ items: similar });
+  let favoriteMap = new Map<string, boolean>();
+  if (req.user && similar.length > 0) {
+    const favorites = await prisma.favorite.findMany({
+      where: { userId: req.user.userId, placeId: { in: similar.map((p) => p.id) } },
+      select: { placeId: true },
+    });
+    favoriteMap = new Map(favorites.map((favorite) => [favorite.placeId, true]));
+  }
+
+  const similarWithFavorite = similar.map((place) => ({
+    ...place,
+    isFavorited: !!favoriteMap.get(place.id),
+  }));
+
+  res.json({ items: similarWithFavorite });
 }
 
 // ------------------------------------------------------------
@@ -137,6 +168,14 @@ const createPlaceSchema = z.object({
   contactPhone: z.string().trim().min(7).max(20),
   contactPhone2: z.string().trim().min(7).max(20).optional(),
   landmark: z.string().trim().min(2).max(160),
+  // URLs already uploaded to Cloudinary via POST /api/uploads/image before
+  // this request — the frontend stages uploads during form-fill and sends
+  // the resulting URLs here rather than uploading files as part of this
+  // request. The first image becomes the cover automatically.
+  images: z
+    .array(z.object({ url: z.string().url(), altText: z.string().trim().max(200).optional() }))
+    .max(10)
+    .optional(),
 }).refine((data) => data.priceMax >= data.priceMin, {
   message: "priceMax must be greater than or equal to priceMin",
   path: ["priceMax"],
@@ -144,9 +183,28 @@ const createPlaceSchema = z.object({
 
 export async function createPlace(req: Request, res: Response) {
   const data = createPlaceSchema.parse(req.body);
+  const { images, ...placeFields } = data;
 
+  // A single Prisma nested-create call — the place row and its
+  // PlaceImage rows are written in one implicit transaction. If anything
+  // fails, nothing is committed; there's no window where a place exists
+  // with no images because a second, separate write failed partway.
   const place = await prisma.place.create({
-    data: { ...data, ownerId: req.user!.userId },
+    data: {
+      ...placeFields,
+      ownerId: req.user!.userId,
+      images: images
+        ? {
+            create: images.map((img, i) => ({
+              url: img.url,
+              altText: img.altText ?? "",
+              isCover: i === 0,
+              sortOrder: i,
+            })),
+          }
+        : undefined,
+    },
+    include: { images: true },
   });
 
   res.status(201).json(place);
