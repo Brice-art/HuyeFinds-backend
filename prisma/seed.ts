@@ -2,19 +2,84 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-async function main() {
-  const categories = await Promise.all(
-    [
+// Students Hub is deliberately NOT in this taxonomy — it's a different
+// content type (posts/classifieds, not places with prices and hours) and
+// gets its own future model. See the schema comment on Subcategory.
+const TAXONOMY = [
+  {
+    name: "Food & Drinks",
+    slug: "food-drinks",
+    icon: "food",
+    sortOrder: 1,
+    subcategories: [
       { name: "Restaurants", slug: "restaurants", icon: "plate", sortOrder: 1 },
-      { name: "Grocery Stores", slug: "grocery", icon: "basket", sortOrder: 2 },
-      { name: "Pharmacies", slug: "pharmacies", icon: "cross", sortOrder: 3 },
-      { name: "Printing Shops", slug: "printing", icon: "printer", sortOrder: 4 },
-    ].map((c) =>
-      prisma.category.upsert({ where: { slug: c.slug }, create: c, update: c })
-    )
-  );
+      { name: "Bars", slug: "bars", icon: "drink", sortOrder: 2 },
+      { name: "Cafes", slug: "cafes", icon: "cup", sortOrder: 3 },
+    ],
+  },
+  {
+    name: "Shopping",
+    slug: "shopping",
+    icon: "bag",
+    sortOrder: 2,
+    subcategories: [
+      { name: "Electronics", slug: "electronics", icon: "device", sortOrder: 1 },
+      { name: "Clothing", slug: "clothing", icon: "shirt", sortOrder: 2 },
+      { name: "Boutique", slug: "boutique", icon: "bag", sortOrder: 3 },
+      { name: "Vegetables & Fruits", slug: "vegetables-fruits", icon: "basket", sortOrder: 4 },
+      { name: "Second Hand", slug: "second-hand", icon: "recycle", sortOrder: 5 },
+    ],
+  },
+  {
+    name: "Services",
+    slug: "services",
+    icon: "tools",
+    sortOrder: 3,
+    subcategories: [
+      { name: "Gas Filling", slug: "gas-filling", icon: "fuel", sortOrder: 1 },
+      { name: "Salons", slug: "salons", icon: "scissors", sortOrder: 2 },
+      { name: "Printing", slug: "printing", icon: "printer", sortOrder: 3 },
+      { name: "Laundry", slug: "laundry", icon: "washer", sortOrder: 4 },
+      { name: "Repairs", slug: "repairs", icon: "wrench", sortOrder: 5 },
+      { name: "Photography", slug: "photography", icon: "camera", sortOrder: 6 },
+    ],
+  },
+  {
+    name: "Accommodation",
+    slug: "accommodation",
+    icon: "building",
+    sortOrder: 4,
+    subcategories: [
+      { name: "Ghetto", slug: "ghetto", icon: "home", sortOrder: 1 },
+      { name: "Hotels & Motels", slug: "hotels-motels", icon: "building", sortOrder: 2 },
+      { name: "Hostels", slug: "hostels", icon: "bunk", sortOrder: 3 },
+      { name: "Apartments", slug: "apartments", icon: "building", sortOrder: 4 },
+    ],
+  },
+];
 
-  const restaurants = categories.find((c) => c.slug === "restaurants")!;
+async function main() {
+  const seededSubcategorySlugs: string[] = [];
+
+  for (const cat of TAXONOMY) {
+    const { subcategories, ...catFields } = cat;
+    const category = await prisma.category.upsert({
+      where: { slug: catFields.slug },
+      create: catFields,
+      update: catFields,
+    });
+
+    for (const sub of subcategories) {
+      await prisma.subcategory.upsert({
+        where: { slug: sub.slug },
+        create: { ...sub, categoryId: category.id },
+        update: { ...sub, categoryId: category.id },
+      });
+      seededSubcategorySlugs.push(sub.slug);
+    }
+  }
+
+  const restaurants = await prisma.subcategory.findUniqueOrThrow({ where: { slug: "restaurants" } });
 
   const amahoro = await prisma.place.upsert({
     where: { slug: "amahoro-canteen" },
@@ -24,7 +89,7 @@ async function main() {
       slug: "amahoro-canteen",
       description:
         "A student-favorite canteen two minutes from the Huye main gate, known for generous rice-and-beans plates and fast service between lectures.",
-      categoryId: restaurants.id,
+      subcategoryId: restaurants.id,
       priceMin: 500,
       priceMax: 2000,
       contactPhone: "+250788214903",
@@ -57,7 +122,8 @@ async function main() {
     },
   });
 
-  console.log("Seeded categories:", categories.map((c) => c.slug).join(", "));
+  console.log("Seeded categories:", TAXONOMY.map((c) => c.slug).join(", "));
+  console.log("Seeded subcategories:", seededSubcategorySlugs.join(", "));
   console.log("Seeded place:", amahoro.slug);
 }
 

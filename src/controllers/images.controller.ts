@@ -37,12 +37,13 @@ export async function uploadPlaceImage(req: Request, res: Response) {
   // general — this confirms they own THIS specific place. An OWNER
   // account shouldn't be able to upload images to someone else's listing
   // just because both accounts share the OWNER role.
-  const isAdmin = req.user!.role === "ADMIN";
+  const isAdmin = ["ADMIN", "OWNER"].includes(req.user!.role);
   if (!isAdmin && place.ownerId !== req.user!.userId) {
     throw new AppError("You don't have permission to modify this place", 403);
   }
 
   const result = await uploadBufferToCloudinary(req.file.buffer, `huye-finds/places/${placeId}`);
+  console.log(result);
 
   // The first image uploaded for a place becomes its cover automatically.
   // After that, isCover has to be set explicitly — a "set as cover"
