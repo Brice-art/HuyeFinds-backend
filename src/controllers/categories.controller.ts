@@ -3,8 +3,24 @@ import { prisma } from "../lib/prisma";
 
 export async function listCategories(_req: Request, res: Response) {
   const categories = await prisma.category.findMany({
-    orderBy: { sortOrder: "asc" },
-    include: { _count: { select: { places: { where: { isActive: true } } } } },
+    orderBy: {
+      sortOrder: "asc",
+    },
+    include: {
+      subcategories: {
+        include: {
+          _count: {
+            select: {
+              places: {
+                where: {
+                  isActive: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   });
 
   res.json({
@@ -13,7 +29,16 @@ export async function listCategories(_req: Request, res: Response) {
       name: c.name,
       slug: c.slug,
       icon: c.icon,
-      placeCount: c._count.places,
+      placeCount: c.subcategories.reduce(
+        (total, sub) => total + sub._count.places,
+        0
+      ),
+      subcategories: c.subcategories.map((sub) => ({
+        id: sub.id,
+        name: sub.name,
+        slug: sub.slug,
+        placeCount: sub._count.places,
+      })),
     })),
   });
 }

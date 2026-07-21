@@ -70,13 +70,33 @@ model User {
 
 model Category {
   id        String   @id @default(cuid())
-  name      String   @unique          // "Restaurants"
-  slug      String   @unique          // "restaurants"
-  icon      String                    // key your frontend maps to an SVG, e.g. "plate"
+  name      String   @unique
+  slug      String   @unique
+  icon      String
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
 
+  subcategories Subcategory[]
+}
+
+// The leaf level of the taxonomy — Places belong to a Subcategory, not
+// directly to a Category. "Food & Drinks" is a Category; "Restaurants",
+// "Bars", "Cafes" are Subcategories under it.
+
+model Subcategory {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  icon      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
   places Place[]
+
+  @@index([categoryId])
 }
 
 // ------------------------------------------------------------
@@ -89,8 +109,8 @@ model Place {
   slug        String  @unique
   description String  @db.Text
 
-  categoryId String
-  category   Category @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  subcategoryId String
+  subcategory   Subcategory @relation(fields: [subcategoryId], references: [id], onDelete: Restrict)
 
   ownerId String?
   owner   User?   @relation("PlaceOwner", fields: [ownerId], references: [id], onDelete: SetNull)
@@ -131,7 +151,7 @@ model Place {
   reviews   Review[]
   favorites Favorite[]
 
-  @@index([categoryId])
+  @@index([subcategoryId])
   @@index([isActive, isFeatured])
   @@index([slug])
 }
