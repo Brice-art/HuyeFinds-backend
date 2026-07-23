@@ -8,6 +8,7 @@ import { reviewsRouter } from "./routes/reviews.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 import { imagesRouter } from "./routes/images.routes";
 import { uploadsRouter } from "./routes/uploads.routes";
+import compression from "compression";
 
 export const app = express();
 
@@ -15,9 +16,12 @@ app.use(
   cors({
     origin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
     credentials: true,
-  })
+  }),
 );
 app.use(express.json());
+// gzip/brotli every response — place lists especially, which carry
+// several images[] arrays of URLs per item and add up fast uncompressed.
+app.use(compression());
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 

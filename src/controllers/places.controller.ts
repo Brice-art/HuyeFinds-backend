@@ -43,6 +43,16 @@ export async function listPlaces(req: Request, res: Response) {
             {
               description: { contains: q.search, mode: "insensitive" as const },
             },
+            {
+              menuItems: {
+                some: {
+                  name: {
+                    contains: q.search,
+                    mode: "insensitive" as const,
+                  },
+                },
+              },
+            },
           ],
         }
       : {}),
