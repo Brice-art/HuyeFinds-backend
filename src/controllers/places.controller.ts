@@ -288,9 +288,9 @@ const createPlaceSchema = z
   });
 
 export async function createPlace(req: Request, res: Response) {
-  console.log("Raw req.body.images:", req.body.images);
+  // console.log("Raw req.body.images:", req.body.images);
   const data = createPlaceSchema.parse(req.body);
-  console.log("Parsed images:", data.images);
+  // console.log("Parsed images:", data.images);
   const { images, menuItems, hours, ...placeFields } = data;
 
   const place = await prisma.place.create({

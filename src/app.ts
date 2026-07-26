@@ -8,6 +8,7 @@ import { reviewsRouter } from "./routes/reviews.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 import { imagesRouter } from "./routes/images.routes";
 import { uploadsRouter } from "./routes/uploads.routes";
+import { hubPostsRouter } from "./routes/hubPosts.routes";
 import compression from "compression";
 
 export const app = express();
@@ -30,6 +31,7 @@ app.use("/api/places", placesRouter);
 app.use("/api/categories", categoriesRouter);
 app.use("/api/favorites", favoritesRouter);
 app.use("/api/reviews", reviewsRouter);
+app.use("/api/hub-posts", hubPostsRouter);
 app.use("/api/places/:placeId/images", imagesRouter);
 app.use("/api/uploads", uploadsRouter);
 
