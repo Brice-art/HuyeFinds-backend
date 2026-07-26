@@ -57,6 +57,7 @@ model User {
   ownedPlaces Place[]    @relation("PlaceOwner")
   reviews     Review[]
   favorites   Favorite[]
+  hubPosts    HubPost[]
 
   @@index([email])
 }
@@ -245,6 +246,34 @@ model HousingListing {
   images HousingImage[]
 
   @@index([isActive])
+}
+
+enum HubPostType {
+  SIDE_HUSTLE
+  LOST_FOUND
+  EVENT
+  ANNOUNCEMENT
+}
+
+model HubPost {
+  id          String      @id @default(cuid())
+  type        HubPostType
+  title       String
+  description String      @db.Text
+
+  contactPhone String?
+  location     String?
+  eventDate    DateTime?
+
+  authorId String
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([type])
+  @@index([authorId])
 }
 
 model HousingImage {
