@@ -13,12 +13,30 @@ import compression from "compression";
 
 export const app = express();
 
+const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim());
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
+    origin(origin, callback) {
+      // Allow requests with no Origin header, such as Postman
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true,
   }),
 );
+
+// app.use(
+//   cors({
+//     origin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
+//     credentials: true,
+//   }),
+// );
 app.use(express.json());
 // gzip/brotli every response — place lists especially, which carry
 // several images[] arrays of URLs per item and add up fast uncompressed.
