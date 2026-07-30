@@ -47,6 +47,7 @@ model User {
   id           String   @id @default(cuid())
   name         String
   email        String   @unique
+  phone        String   @default("+250780000000")
   passwordHash String
   role         Role     @default(STUDENT)
   avatarUrl    String?
@@ -58,8 +59,25 @@ model User {
   reviews     Review[]
   favorites   Favorite[]
   hubPosts    HubPost[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([email])
+}
+
+// Never store the raw reset token — only a hash of it. The raw token is
+// emailed to the user and never touches the database; a leaked DB alone
+// is then not enough to reset anyone's password.
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 // ------------------------------------------------------------
