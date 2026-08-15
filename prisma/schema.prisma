@@ -59,6 +59,9 @@ model User {
   reviews     Review[]
   favorites   Favorite[]
   hubPosts    HubPost[]
+  hubPostLikes    HubPostLike[]
+  hubPostSaves    HubPostSave[]
+  hubPostComments HubPostComment[]
   passwordResetTokens PasswordResetToken[]
 
   @@index([email])
@@ -268,6 +271,7 @@ model HousingListing {
 
 enum HubPostType {
   SIDE_HUSTLE
+  BUY_SELL
   LOST_FOUND
   EVENT
   ANNOUNCEMENT
@@ -278,6 +282,11 @@ model HubPost {
   type        HubPostType
   title       String
   description String      @db.Text
+
+  price     Int?
+  isUrgent  Boolean @default(false)
+  isPinned  Boolean @default(false)
+  viewCount Int     @default(0)
 
   contactPhone String?
   location     String?
@@ -290,8 +299,62 @@ model HubPost {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  images   HubPostImage[]
+  likes    HubPostLike[]
+  saves    HubPostSave[]
+  comments HubPostComment[]
+
   @@index([type])
   @@index([authorId])
+  @@index([isPinned])
+}
+
+model HubPostImage {
+  id        String  @id @default(cuid())
+  hubPostId String
+  hubPost   HubPost @relation(fields: [hubPostId], references: [id], onDelete: Cascade)
+  url       String
+  altText   String
+  isCover   Boolean @default(false)
+  sortOrder Int     @default(0)
+
+  @@index([hubPostId])
+}
+
+model HubPostLike {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hubPostId String
+  hubPost   HubPost  @relation(fields: [hubPostId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, hubPostId])
+  @@index([hubPostId])
+}
+
+model HubPostSave {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hubPostId String
+  hubPost   HubPost  @relation(fields: [hubPostId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, hubPostId])
+  @@index([hubPostId])
+}
+
+model HubPostComment {
+  id        String   @id @default(cuid())
+  hubPostId String
+  hubPost   HubPost  @relation(fields: [hubPostId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([hubPostId])
 }
 
 model HousingImage {
