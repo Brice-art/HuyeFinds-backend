@@ -230,8 +230,7 @@ const dayOfWeekEnum = z.enum([
   "SUNDAY",
 ]);
 
-const createPlaceSchema = z
-  .object({
+const createPlaceBaseSchema = z.object({
     name: z.string().trim().min(2).max(120),
     slug: z
       .string()
@@ -281,11 +280,12 @@ const createPlaceSchema = z
       )
       .length(7)
       .optional(),
-  })
-  .refine((data) => data.priceMax >= data.priceMin, {
-    message: "priceMax must be greater than or equal to priceMin",
-    path: ["priceMax"],
-  });
+});
+
+const createPlaceSchema = createPlaceBaseSchema.refine((data) => data.priceMax >= data.priceMin, {
+  message: "priceMax must be greater than or equal to priceMin",
+  path: ["priceMax"],
+});
 
 export async function createPlace(req: Request, res: Response) {
   // console.log("Raw req.body.images:", req.body.images);
@@ -316,4 +316,66 @@ export async function createPlace(req: Request, res: Response) {
   });
 
   res.status(201).json(place);
+}
+
+const updatePlaceSchema = createPlaceBaseSchema.partial();
+
+export async function updatePlace(req: Request, res: Response) {
+  const { slug } = req.params;
+  const data = updatePlaceSchema.parse(req.body);
+
+  const place = await prisma.place.findUnique({ where: { slug }, select: { id: true } });
+  if (!place) throw new AppError("Place not found", 404);
+
+  const { images, menuItems, hours, ...placeFields } = data as any;
+
+  const ops: any[] = [];
+
+  // update place fields
+  ops.push(prisma.place.update({ where: { slug }, data: placeFields }));
+
+  // replace images if provided
+  if (images) {
+    ops.push(prisma.placeImage.deleteMany({ where: { placeId: place.id } }));
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      ops.push(
+        prisma.placeImage.create({
+          data: {
+            placeId: place.id,
+            url: img.url,
+            altText: img.altText ?? "",
+            isCover: i === 0,
+            sortOrder: i,
+          },
+        }),
+      );
+    }
+  }
+
+  if (menuItems) {
+    ops.push(prisma.menuItem.deleteMany({ where: { placeId: place.id } }));
+    for (let i = 0; i < menuItems.length; i++) {
+      const item = menuItems[i];
+      ops.push(
+        prisma.menuItem.create({ data: { ...item, placeId: place.id, sortOrder: i } }),
+      );
+    }
+  }
+
+  if (hours) {
+    ops.push(prisma.businessHour.deleteMany({ where: { placeId: place.id } }));
+    for (let i = 0; i < hours.length; i++) {
+      ops.push(prisma.businessHour.create({ data: { ...hours[i], placeId: place.id } }));
+    }
+  }
+
+  await prisma.$transaction(ops);
+
+  const updated = await prisma.place.findUnique({
+    where: { id: place.id },
+    include: { images: true, menuItems: true, hours: true },
+  });
+
+  res.json(updated);
 }
