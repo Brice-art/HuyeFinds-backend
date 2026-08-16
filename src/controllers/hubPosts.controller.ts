@@ -216,6 +216,55 @@ export async function createHubPost(req: Request, res: Response) {
     });
 }
 
+const updateHubPostSchema = createHubPostSchema.partial();
+
+export async function updateHubPost(req: Request, res: Response) {
+  const { id } = req.params;
+  const data = updateHubPostSchema.parse(req.body);
+
+  const post = await prisma.hubPost.findUnique({ where: { id }, select: { authorId: true } });
+  if (!post) throw new AppError("Post not found", 404);
+
+  const isAdmin = req.user!.role === "ADMIN";
+  if (!isAdmin && post.authorId !== req.user!.userId) {
+    throw new AppError("You don't have permission to edit this post", 403);
+  }
+
+  const { images, ...fields } = data as any;
+
+  // Update main fields first
+  await prisma.hubPost.update({ where: { id }, data: fields });
+
+  if (images) {
+    // replace images
+    await prisma.hubPostImage.deleteMany({ where: { hubPostId: id } });
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      await prisma.hubPostImage.create({
+        data: {
+          hubPostId: id,
+          url: img.url,
+          altText: img.altText ?? "",
+          isCover: i === 0,
+          sortOrder: i,
+        },
+      });
+    }
+  }
+
+  const updated = await prisma.hubPost.findUnique({
+    where: { id },
+    include: { author: { select: { name: true } }, images: true, _count: { select: { likes: true, comments: true } } },
+  });
+
+  const { _count, ...rest } = updated!;
+  res.json({
+    ...rest,
+    likeCount: _count.likes,
+    commentCount: _count.comments,
+  });
+}
+
 export async function deleteHubPost(req: Request, res: Response) {
   const { id } = req.params;
 

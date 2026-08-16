@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createPlace,
+  updatePlace,
   getPlaceBySlug,
   getSimilarPlaces,
   listPlaces,
@@ -14,3 +15,9 @@ placesRouter.get("/", attachUserIfPresent, asyncHandler(listPlaces));
 placesRouter.get("/:slug", attachUserIfPresent, asyncHandler(getPlaceBySlug));
 placesRouter.get("/:slug/similar", attachUserIfPresent, asyncHandler(getSimilarPlaces));
 placesRouter.post("/", requireAuth, requireRole("OWNER", "ADMIN"), asyncHandler(createPlace));
+placesRouter.patch(
+  "/:slug",
+  requireAuth,
+  requireRole("ADMIN"),
+  asyncHandler(updatePlace),
+);

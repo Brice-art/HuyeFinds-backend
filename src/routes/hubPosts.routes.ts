@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createHubPost,
+  updateHubPost,
   createHubPostComment,
   deleteHubPost,
   getHubPostById,
@@ -26,6 +27,7 @@ hubPostsRouter.get("/stats", asyncHandler(getHubPostStats));
 
 hubPostsRouter.get("/", attachUserIfPresent, asyncHandler(listHubPosts));
 hubPostsRouter.get("/:id", attachUserIfPresent, asyncHandler(getHubPostById));
+hubPostsRouter.patch("/:id", requireAuth, asyncHandler(updateHubPost));
 hubPostsRouter.post("/", requireAuth, asyncHandler(createHubPost));
 hubPostsRouter.delete("/:id", requireAuth, asyncHandler(deleteHubPost));
 hubPostsRouter.patch(
