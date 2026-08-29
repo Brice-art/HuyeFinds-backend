@@ -9,6 +9,7 @@ import { errorHandler, notFoundHandler } from "./middleware/error.middleware";
 import { imagesRouter } from "./routes/images.routes";
 import { uploadsRouter } from "./routes/uploads.routes";
 import { hubPostsRouter } from "./routes/hubPosts.routes";
+import { ogRouter } from "./routes/og.routes";
 import compression from "compression";
 
 export const app = express();
@@ -43,6 +44,9 @@ app.use(express.json());
 app.use(compression());
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+// Open Graph HTML for link previews (WhatsApp, etc.)
+app.use("/og", ogRouter);
 
 app.use("/api/auth", authRouter);
 app.use("/api/places", placesRouter);
