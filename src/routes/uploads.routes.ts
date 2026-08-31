@@ -9,7 +9,7 @@ export const uploadsRouter = Router();
 uploadsRouter.post(
   "/image",
   requireAuth,
-  requireRole("OWNER", "ADMIN"),
+  requireRole("STUDENT", "OWNER", "ADMIN"),
   upload.single("image"),
   asyncHandler(uploadStagingImage)
 );

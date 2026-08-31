@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import {
   forgotPassword,
   login,
@@ -11,8 +12,20 @@ import { requireAuth } from "../middleware/auth.middleware";
 
 export const authRouter = Router();
 
-authRouter.post("/register", asyncHandler(register));
-authRouter.post("/login", asyncHandler(login));
+const authLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => req.ip ?? "unknown",
+  message: {
+    error: "Too many login attempts. Please wait 15 minutes before trying again.",
+  },
+});
+
+authRouter.post("/register", authLoginLimiter, asyncHandler(register));
+authRouter.post("/login", authLoginLimiter, asyncHandler(login));
 authRouter.get("/me", requireAuth, asyncHandler(me));
-authRouter.post("/forgot-password", asyncHandler(forgotPassword));
-authRouter.post("/reset-password", asyncHandler(resetPassword));
+authRouter.post("/forgot-password", authLoginLimiter, asyncHandler(forgotPassword));
+authRouter.post("/reset-password", authLoginLimiter, asyncHandler(resetPassword));
