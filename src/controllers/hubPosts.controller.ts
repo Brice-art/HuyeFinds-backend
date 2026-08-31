@@ -190,6 +190,7 @@ export async function createHubPost(req: Request, res: Response) {
   const post = await prisma.hubPost.create({
     data: {
       ...fields,
+      isActive: req.user!.role === "ADMIN",
       authorId: req.user!.userId,
       images: images
         ? {
