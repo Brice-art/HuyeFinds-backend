@@ -87,7 +87,7 @@ export async function ogPlace(req: Request, res: Response) {
     },
   });
 
-  if (!place || !place.isActive) {
+  if (!place || !place.isActive || place.verificationStatus === "SUSPENDED") {
     res.status(404).send("Not found");
     return;
   }
@@ -123,7 +123,7 @@ export async function ogHubPost(req: Request, res: Response) {
     },
   });
 
-  if (!post || !post.isActive) {
+  if (!post || post.status !== "APPROVED") {
     res.status(404).send("Not found");
     return;
   }

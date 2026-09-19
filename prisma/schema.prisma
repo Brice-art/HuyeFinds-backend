@@ -39,6 +39,45 @@ enum DayOfWeek {
   SUNDAY
 }
 
+// Student Hub posts move through a moderation lifecycle. `REJECTED` keeps the
+// row for audit (unlike a hard delete) and `REMOVED` takes down a previously
+// approved post — e.g. after a report. Public endpoints only ever serve
+// `APPROVED` posts.
+enum HubPostStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REMOVED
+}
+
+// Trust state of a place listing. Ownership (Place.ownerId) and trust are kept
+// separate: a restaurant can be listed without being owned yet (UNVERIFIED),
+// become CLAIMED once an owner is approved, VERIFIED when an admin vouches for
+// it, or SUSPENDED (hidden from public listings) while a problem is sorted out.
+enum PlaceVerificationStatus {
+  UNVERIFIED
+  CLAIMED
+  VERIFIED
+  SUSPENDED
+}
+
+enum ReportTargetType {
+  HUB_POST
+  PLACE
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
 // ------------------------------------------------------------
 // Users
 // ------------------------------------------------------------
@@ -62,6 +101,12 @@ model User {
   hubPostLikes    HubPostLike[]
   hubPostSaves    HubPostSave[]
   hubPostComments HubPostComment[]
+  placeClaims     PlaceClaim[]
+  placeClaimsReviewed PlaceClaim[]   @relation("ReviewHandler")
+  placeEditRequests PlaceEditRequest[] @relation("EditRequester")
+  placeEditRequestsReviewed PlaceEditRequest[] @relation("EditReviewer")
+  reportsMade      Report[]      @relation("ReportReporter")
+  reportsHandled   Report[]      @relation("ReportHandler")
   passwordResetTokens PasswordResetToken[]
 
   @@index([email])
@@ -137,6 +182,10 @@ model Place {
   ownerId String?
   owner   User?   @relation("PlaceOwner", fields: [ownerId], references: [id], onDelete: SetNull)
 
+  // Trust/ownership state — separate from `isActive` (soft delete). Public
+  // listings and detail pages exclude SUSPENDED places.
+  verificationStatus PlaceVerificationStatus @default(UNVERIFIED)
+
   // Price range in RWF. RWF has no minor currency unit in practice,
   // so plain Int is correct here — do not use Float for money.
   priceMin Int
@@ -167,11 +216,13 @@ model Place {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  images    PlaceImage[]
-  menuItems MenuItem[]
-  hours     BusinessHour[]
-  reviews   Review[]
-  favorites Favorite[]
+  images       PlaceImage[]
+  menuItems    MenuItem[]
+  hours        BusinessHour[]
+  reviews      Review[]
+  favorites    Favorite[]
+  claims       PlaceClaim[]
+  editRequests PlaceEditRequest[]
 
   @@index([subcategoryId])
   @@index([isActive, isFeatured])
@@ -250,6 +301,84 @@ model Favorite {
 }
 
 // ------------------------------------------------------------
+// Restaurant ownership & verification workflow
+// ------------------------------------------------------------
+
+// A request to become the owner of an unowned place. Ownership is only
+// granted after an admin approves the claim — a student can never self-assign.
+model PlaceClaim {
+  id        String   @id @default(cuid())
+  placeId   String
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    ReviewStatus @default(PENDING)
+  // Optional free-text evidence the claimant wants the admin to see
+  // (e.g. "I manage this canteen, ask for Gerald at the counter").
+  note      String?  @db.Text
+  reviewedById String?
+  reviewedBy   User?  @relation("ReviewHandler", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+  createdAt DateTime @default(now())
+
+  // One open claim per user per place. Rejected/approved claims leave a
+  // historical row, so a claimant can re-apply after a rejection — the
+  // uniqueness constraint only covers PENDING claims.
+  @@unique([placeId, userId, status])
+  @@index([status])
+  @@index([placeId])
+}
+
+// Proposed high-risk changes to a place (name, location, phone, ...).
+// Owners can't apply these directly — an admin must review and approve.
+// Low-risk fields (menu, prices, description, hours) bypass this entirely.
+model PlaceEditRequest {
+  id        String   @id @default(cuid())
+  placeId   String
+  place     Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  requesterId String
+  requester   User   @relation("EditRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  status    ReviewStatus @default(PENDING)
+  // The proposed values for the fields that need review (name, slug,
+  // subcategoryId, contactPhone, contactPhone2, landmark, lat/lng).
+  data      Json
+  reviewNote   String?
+  reviewedById String?
+  reviewedBy   User?  @relation("EditReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([status])
+  @@index([placeId])
+}
+
+// ------------------------------------------------------------
+// User reports (moderation intake)
+// ------------------------------------------------------------
+
+// A logged-in user flags a hub post or a place for review. Admins resolve or
+// dismiss reports from the dashboard. Reports never mutate the target on
+// their own — the human decision does.
+model Report {
+  id         String   @id @default(cuid())
+  targetType ReportTargetType
+  targetId   String
+  reporterId String
+  reporter   User     @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reason     String   @db.Text
+  details    String?  @db.Text
+  status     ReportStatus @default(OPEN)
+  resolvedById String?
+  resolvedBy   User?  @relation("ReportHandler", fields: [resolvedById], references: [id], onDelete: SetNull)
+  resolvedAt   DateTime?
+  createdAt    DateTime @default(now())
+
+  @@index([status])
+  @@index([targetType, targetId])
+  @@index([reporterId])
+}
+
+// ------------------------------------------------------------
 // Housing (scaffolded for the roadmap — not wired to the UI yet)
 // ------------------------------------------------------------
 
@@ -295,7 +424,8 @@ model HubPost {
   authorId String
   author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
-  isActive  Boolean  @default(true)
+  // Moderation lifecycle — public endpoints only serve APPROVED posts.
+  status    HubPostStatus @default(PENDING)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -307,6 +437,7 @@ model HubPost {
   @@index([type])
   @@index([authorId])
   @@index([isPinned])
+  @@index([status])
 }
 
 model HubPostImage {

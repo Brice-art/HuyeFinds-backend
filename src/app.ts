@@ -12,6 +12,7 @@ import { uploadsRouter } from "./routes/uploads.routes";
 import { hubPostsRouter } from "./routes/hubPosts.routes";
 import { ogRouter } from "./routes/og.routes";
 import { adminRouter } from "./routes/admin.routes";
+import { reportsRouter } from "./routes/reports.routes";
 import compression from "compression";
 
 export const app = express();
@@ -78,6 +79,7 @@ app.use("/api/reviews", reviewsRouter);
 app.use("/api/hub-posts", hubPostsRouter);
 app.use("/api/places/:placeId/images", imagesRouter);
 app.use("/api/uploads", uploadsRouter);
+app.use("/api/reports", reportsRouter);
 
 // Must be registered last, in this order: 404 handler, then error handler.
 app.use(notFoundHandler);
