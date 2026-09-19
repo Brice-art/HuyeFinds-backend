@@ -30,7 +30,7 @@ export async function listHubPosts(req: Request, res: Response) {
   const q = listQuerySchema.parse(req.query);
 
   const where = {
-    isActive: true,
+    status: "APPROVED" as const,
     ...(q.pinned !== undefined ? { isPinned: q.pinned } : {}),
     ...(q.type ? { type: q.type } : {}),
     ...(q.search
@@ -105,11 +105,11 @@ export async function listHubPosts(req: Request, res: Response) {
 export async function getHubPostStats(_req: Request, res: Response) {
   const counts = await prisma.hubPost.groupBy({
     by: ["type"],
-    where: { isActive: true },
+    where: { status: "APPROVED" },
     _count: true,
   });
 
-  const total = await prisma.hubPost.count({ where: { isActive: true } });
+  const total = await prisma.hubPost.count({ where: { status: "APPROVED" } });
 
   const byType: Record<string, number> = {};
   counts.forEach((c) => {
@@ -122,20 +122,39 @@ export async function getHubPostStats(_req: Request, res: Response) {
 export async function getHubPostById(req: Request, res: Response) {
   const { id } = req.params;
 
-  const post = await prisma.hubPost
-    .update({
+  const post = await prisma.hubPost.findUnique({
+    where: { id },
+    include: {
+      author: { select: { name: true } },
+      images: { orderBy: { sortOrder: "asc" } },
+      _count: { select: { likes: true, comments: true } },
+    },
+  });
+
+  if (!post) {
+    throw new AppError("Post not found", 404);
+  }
+
+  // Public users only ever see APPROVED posts. The author (or an admin) may
+  // still open their own pending/rejected/removed post — needed so a queued
+  // post's detail/edit links work and authors can follow up on moderation.
+  if (post.status !== "APPROVED") {
+    const mayView =
+      req.user &&
+      (post.authorId === req.user.userId || req.user.role === "ADMIN");
+    if (!mayView) {
+      throw new AppError("Post not found", 404);
+    }
+  }
+
+  // Only count public views — don't let an author inflate their own counter
+  // while a post is pending.
+  if (post.status === "APPROVED") {
+    await prisma.hubPost.update({
       where: { id },
       data: { viewCount: { increment: 1 } },
-      include: {
-        author: { select: { name: true } },
-        images: { orderBy: { sortOrder: "asc" } },
-        _count: { select: { likes: true, comments: true } },
-      },
-    })
-    .catch(() => null);
-
-  if (!post || !post.isActive) {
-    throw new AppError("Post not found", 404);
+    });
+    post.viewCount += 1;
   }
 
   let isLiked = false;
@@ -190,7 +209,7 @@ export async function createHubPost(req: Request, res: Response) {
   const post = await prisma.hubPost.create({
     data: {
       ...fields,
-      isActive: req.user!.role === "ADMIN",
+      status: req.user!.role === "ADMIN" ? "APPROVED" : "PENDING",
       authorId: req.user!.userId,
       images: images
         ? {
@@ -223,7 +242,10 @@ export async function updateHubPost(req: Request, res: Response) {
   const { id } = req.params;
   const data = updateHubPostSchema.parse(req.body);
 
-  const post = await prisma.hubPost.findUnique({ where: { id }, select: { authorId: true } });
+  const post = await prisma.hubPost.findUnique({
+    where: { id },
+    select: { authorId: true, status: true },
+  });
   if (!post) throw new AppError("Post not found", 404);
 
   const isAdmin = req.user!.role === "ADMIN";
@@ -232,6 +254,13 @@ export async function updateHubPost(req: Request, res: Response) {
   }
 
   const { images, ...fields } = data as any;
+
+  // A non-admin editing an already-approved post sends it back to the
+  // moderation queue — edits can change what the public sees, so they need
+  // the same review as new posts.
+  if (!isAdmin && post.status === "APPROVED") {
+    fields.status = "PENDING";
+  }
 
   // Update main fields first
   await prisma.hubPost.update({ where: { id }, data: fields });

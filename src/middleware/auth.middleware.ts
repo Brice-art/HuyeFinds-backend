@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { verifyToken } from "../utils/jwt";
 import { AppError } from "../utils/AppError";
+import { prisma } from "../lib/prisma";
 
 function extractToken(req: Request): string | null {
   const header = req.headers.authorization;
@@ -37,12 +38,34 @@ export function attachUserIfPresent(req: Request, _res: Response, next: NextFunc
   next();
 }
 
-// Use after requireAuth on routes restricted to specific roles.
+// Use after requireAuth on routes restricted to specific roles. The role is
+// re-read from the database rather than trusting the (possibly stale) JWT
+// claim — a user promoted to OWNER by a claim approval, demoted, or otherwise
+// re-rolled must have that take effect on the next request, and a leaked
+// token must never outlive a role change.
 export function requireRole(...roles: Array<"STUDENT" | "OWNER" | "ADMIN">) {
-  return (req: Request, _res: Response, next: NextFunction) => {
-    if (!req.user || !roles.includes(req.user.role)) {
-      return next(new AppError("You don't have permission to do this", 403));
+  return async (req: Request, _res: Response, next: NextFunction) => {
+    try {
+      if (!req.user) {
+        return next(new AppError("You don't have permission to do this", 403));
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { id: req.user.userId },
+        select: { role: true },
+      });
+
+      if (!user || !roles.includes(user.role)) {
+        return next(new AppError("You don't have permission to do this", 403));
+      }
+
+      // Keep the JWT payload's role in sync so downstream code (which reads
+      // req.user.role) sees the same role the DB check just authorized.
+      req.user.role = user.role;
+
+      next();
+    } catch {
+      next(new AppError("You don't have permission to do this", 403));
     }
-    next();
   };
 }
