@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import { Prisma, DayOfWeek } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { cacheGet, cacheSet, invalidatePlaceCaches } from "../lib/cache";
+import { computeIsOpenNow } from "../lib/openNow";
 import { AppError } from "../utils/AppError";
 
 // ------------------------------------------------------------
@@ -31,6 +33,9 @@ export async function listPlaces(req: Request, res: Response) {
     isActive: true,
     // A SUSPENDED listing is not shown publicly until an admin resolves it.
     verificationStatus: { not: "SUSPENDED" as const },
+    // Only admin-approved places appear publicly. New submissions default
+    // to PENDING and stay hidden until an admin reviews them.
+    moderationStatus: "APPROVED" as const,
     // `subcategory` filters to one leaf; `category` (with no subcategory
     // given) filters to every place under any of that category's
     // subcategories.
@@ -77,6 +82,7 @@ export async function listPlaces(req: Request, res: Response) {
           },
         },
         images: { where: { isCover: true }, take: 1 },
+        hours: true,
       },
     }),
     prisma.place.count({ where }),
@@ -94,9 +100,13 @@ export async function listPlaces(req: Request, res: Response) {
     favoritedIds = new Set(favs.map((f) => f.placeId));
   }
 
-  const itemsWithFavorite = items.map((place) => ({
+  // `hours` is used to compute the open/closed flag and then dropped — the
+  // full week of times bloats every card payload for a signal cards only
+  // need as a boolean.
+  const itemsWithFavorite = items.map(({ hours, ...place }) => ({
     ...place,
     isFavorited: favoritedIds.has(place.id),
+    isOpenNow: computeIsOpenNow(hours),
   }));
 
   res.json({
@@ -132,7 +142,22 @@ export async function getPlaceBySlug(req: Request, res: Response) {
     },
   });
 
-  if (!place || !place.isActive || place.verificationStatus === "SUSPENDED") {
+  if (!place) {
+    throw new AppError("Place not found", 404);
+  }
+
+  // Public access requires an APPROVED, non-suspended, active listing.
+  // Owners and admins may preview their own place while it is pending
+  // review (e.g. right after submitting it).
+  const publiclyVisible =
+    place.isActive &&
+    place.verificationStatus !== "SUSPENDED" &&
+    place.moderationStatus === "APPROVED";
+  const privileged =
+    !!req.user &&
+    (req.user.role === "ADMIN" || place.ownerId === req.user.userId);
+
+  if (!publiclyVisible && !privileged) {
     throw new AppError("Place not found", 404);
   }
 
@@ -144,7 +169,7 @@ export async function getPlaceBySlug(req: Request, res: Response) {
     isFavorited = !!fav;
   }
 
-  res.json({ ...place, isFavorited });
+  res.json({ ...place, isFavorited, isOpenNow: computeIsOpenNow(place.hours) });
 }
 
 // ------------------------------------------------------------
@@ -153,6 +178,18 @@ export async function getPlaceBySlug(req: Request, res: Response) {
 
 export async function getSimilarPlaces(req: Request, res: Response) {
   const { slug } = req.params;
+
+  // Similar-place recommendations are stable for a given listing, so cache
+  // them in memory (10 min) — but only for unauthenticated requests; signed-in
+  // visitors need fresh isFavorited flags.
+  const cacheKey = `similar:${slug}`;
+  if (!req.user) {
+    const cached = cacheGet<unknown>(cacheKey);
+    if (cached) {
+      res.json(cached);
+      return;
+    }
+  }
 
   const place = await prisma.place.findUnique({
     where: { slug },
@@ -174,6 +211,7 @@ export async function getSimilarPlaces(req: Request, res: Response) {
       },
       isActive: true,
       verificationStatus: { not: "SUSPENDED" },
+      moderationStatus: "APPROVED",
       id: { not: place.id },
     },
     take: 4,
@@ -200,6 +238,7 @@ export async function getSimilarPlaces(req: Request, res: Response) {
         },
         take: 1,
       },
+      hours: true,
     },
   });
 
@@ -215,8 +254,86 @@ export async function getSimilarPlaces(req: Request, res: Response) {
     favoritedIds = new Set(favs.map((f) => f.placeId));
   }
 
+  const payload = {
+    items: similar.map(({ hours, ...p }) => ({
+      ...p,
+      isFavorited: favoritedIds.has(p.id),
+      isOpenNow: computeIsOpenNow(hours),
+    })),
+  };
+
+  if (!req.user) cacheSet(cacheKey, payload, 10 * 60 * 1000);
+
+  res.json(payload);
+}
+
+// ------------------------------------------------------------
+// GET /api/places/recommended — "based on your saved places"
+// ------------------------------------------------------------
+// Signed-in users get places in the same subcategories as their favorites,
+// minus the favorites themselves, rated first. Anonymous visitors (or users
+// with no favorites yet) get an empty list — the frontend falls back to a
+// generic "top picks" row instead of a half-personalized one.
+
+export async function getRecommendedPlaces(req: Request, res: Response) {
+  const rawLimit = Math.floor(Number(req.query.limit));
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(rawLimit, 1), 8)
+    : 4;
+
+  if (!req.user) {
+    res.json({ items: [] });
+    return;
+  }
+
+  const favorites = await prisma.favorite.findMany({
+    where: { userId: req.user.userId },
+    select: {
+      placeId: true,
+      place: { select: { subcategoryId: true } },
+    },
+  });
+  if (favorites.length === 0) {
+    res.json({ items: [] });
+    return;
+  }
+
+  const favoritedIds = favorites.map((f) => f.placeId);
+  const subcategoryIds = [
+    ...new Set(favorites.map((f) => f.place.subcategoryId)),
+  ];
+
+  const items = await prisma.place.findMany({
+    where: {
+      isActive: true,
+      verificationStatus: { not: "SUSPENDED" },
+      moderationStatus: "APPROVED",
+      id: { notIn: favoritedIds },
+      subcategoryId: { in: subcategoryIds },
+    },
+    take: limit,
+    orderBy: [{ ratingAvg: "desc" }, { favoriteCount: "desc" }],
+    include: {
+      subcategory: {
+        select: {
+          name: true,
+          slug: true,
+          icon: true,
+          category: { select: { name: true, slug: true } },
+        },
+      },
+      images: { where: { isCover: true }, take: 1 },
+      hours: true,
+    },
+  });
+
   res.json({
-    items: similar.map((p) => ({ ...p, isFavorited: favoritedIds.has(p.id) })),
+    items: items.map(({ hours, ...place }) => ({
+      ...place,
+      // Recommended places are by definition not among the user's favorites.
+      isFavorited: false,
+      isOpenNow: computeIsOpenNow(hours),
+    })),
   });
 }
 
@@ -301,6 +418,9 @@ export async function createPlace(req: Request, res: Response) {
     data: {
       ...placeFields,
       ownerId: req.user!.userId,
+      // New submissions enter the moderation queue. They become publicly
+      // visible only after an admin approves them.
+      moderationStatus: "PENDING",
       images: images
         ? {
             create: images.map((img, i) => ({
@@ -319,6 +439,8 @@ export async function createPlace(req: Request, res: Response) {
     include: { images: true, menuItems: true, hours: true },
   });
 
+  // A new listing can shift "similar place" recommendations for its category.
+  invalidatePlaceCaches();
   res.status(201).json(place);
 }
 
@@ -487,6 +609,8 @@ export async function updatePlace(req: Request, res: Response) {
     hours,
   });
 
+  // Edits invalidate cached recommendations for every place in this category.
+  invalidatePlaceCaches();
   res.json(updated);
 }
 
@@ -503,6 +627,7 @@ export async function getMyPlaces(req: Request, res: Response) {
       name: true,
       slug: true,
       verificationStatus: true,
+      moderationStatus: true,
       isActive: true,
       landmark: true,
       contactPhone: true,
@@ -538,10 +663,17 @@ export async function claimPlace(req: Request, res: Response) {
       ownerId: true,
       isActive: true,
       verificationStatus: true,
+      moderationStatus: true,
     },
   });
 
-  if (!place || !place.isActive || place.verificationStatus === "SUSPENDED") {
+  // Only listings that are publicly visible can be claimed.
+  if (
+    !place ||
+    !place.isActive ||
+    place.verificationStatus === "SUSPENDED" ||
+    place.moderationStatus !== "APPROVED"
+  ) {
     throw new AppError("Place not found", 404);
   }
 

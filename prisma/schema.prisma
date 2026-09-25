@@ -61,6 +61,17 @@ enum PlaceVerificationStatus {
   SUSPENDED
 }
 
+// Moderation state of a place listing, mirroring the HubPostStatus
+// lifecycle: a newly created place is PENDING until an admin approves it,
+// REJECTED keeps the row for audit, and a once-approved place that turns
+// out to be a problem is suspended via verificationStatus (SUSPENDED).
+// Public endpoints only ever serve APPROVED places.
+enum PlaceModerationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum ReportTargetType {
   HUB_POST
   PLACE
@@ -185,6 +196,10 @@ model Place {
   // Trust/ownership state — separate from `isActive` (soft delete). Public
   // listings and detail pages exclude SUSPENDED places.
   verificationStatus PlaceVerificationStatus @default(UNVERIFIED)
+  // New submissions are PENDING until an admin approves them. Existing
+  // places were backfilled to APPROVED by the place_moderation migration
+  // so nothing already public disappears.
+  moderationStatus PlaceModerationStatus @default(PENDING)
 
   // Price range in RWF. RWF has no minor currency unit in practice,
   // so plain Int is correct here — do not use Float for money.

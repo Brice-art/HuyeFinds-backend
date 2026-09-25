@@ -1,7 +1,11 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
+import { cacheGet, cacheSet } from "../lib/cache";
 import { AppError } from "../utils/AppError";
+
+const HUB_STATS_CACHE_KEY = "hub-posts:stats";
+const HUB_STATS_TTL_MS = 60 * 1000;
 
 const hubPostTypeEnum = z.enum([
   "SIDE_HUSTLE",
@@ -52,7 +56,7 @@ export async function listHubPosts(req: Request, res: Response) {
       take: q.limit,
       orderBy: ORDER_BY[q.sort],
       include: {
-        author: { select: { name: true } },
+        author: { select: { name: true, role: true } },
         images: { where: { isCover: true }, take: 1 },
         _count: { select: { likes: true, comments: true } },
       },
@@ -103,6 +107,16 @@ export async function listHubPosts(req: Request, res: Response) {
 }
 
 export async function getHubPostStats(_req: Request, res: Response) {
+  // Readability stats are shown in the hero on the landing page; they only
+  // drift as new posts get approved, so a 60s in-memory cache is plenty.
+  const cached = cacheGet<{ total: number; byType: Record<string, number> }>(
+    HUB_STATS_CACHE_KEY,
+  );
+  if (cached) {
+    res.json(cached);
+    return;
+  }
+
   const counts = await prisma.hubPost.groupBy({
     by: ["type"],
     where: { status: "APPROVED" },
@@ -116,7 +130,9 @@ export async function getHubPostStats(_req: Request, res: Response) {
     byType[c.type] = c._count;
   });
 
-  res.json({ total, byType });
+  const payload = { total, byType };
+  cacheSet(HUB_STATS_CACHE_KEY, payload, HUB_STATS_TTL_MS);
+  res.json(payload);
 }
 
 export async function getHubPostById(req: Request, res: Response) {
@@ -125,7 +141,7 @@ export async function getHubPostById(req: Request, res: Response) {
   const post = await prisma.hubPost.findUnique({
     where: { id },
     include: {
-      author: { select: { name: true } },
+      author: { select: { name: true, role: true } },
       images: { orderBy: { sortOrder: "asc" } },
       _count: { select: { likes: true, comments: true } },
     },
@@ -222,7 +238,7 @@ export async function createHubPost(req: Request, res: Response) {
           }
         : undefined,
     },
-    include: { author: { select: { name: true } }, images: true },
+    include: { author: { select: { name: true, role: true } }, images: true },
   });
 
   res
@@ -284,7 +300,7 @@ export async function updateHubPost(req: Request, res: Response) {
 
   const updated = await prisma.hubPost.findUnique({
     where: { id },
-    include: { author: { select: { name: true } }, images: true, _count: { select: { likes: true, comments: true } } },
+    include: { author: { select: { name: true, role: true } }, images: true, _count: { select: { likes: true, comments: true } } },
   });
 
   const { _count, ...rest } = updated!;
@@ -381,7 +397,7 @@ export async function listHubPostComments(req: Request, res: Response) {
   const comments = await prisma.hubPostComment.findMany({
     where: { hubPostId: id },
     orderBy: { createdAt: "asc" },
-    include: { author: { select: { name: true } } },
+    include: { author: { select: { name: true, role: true } } },
   });
 
   res.json({ items: comments });
@@ -403,7 +419,7 @@ export async function createHubPostComment(req: Request, res: Response) {
 
   const comment = await prisma.hubPostComment.create({
     data: { hubPostId: id, authorId: req.user!.userId, body },
-    include: { author: { select: { name: true } } },
+    include: { author: { select: { name: true, role: true } } },
   });
 
   res.status(201).json(comment);

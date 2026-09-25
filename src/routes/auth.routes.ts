@@ -1,5 +1,5 @@
 import { Router } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import {
   forgotPassword,
   login,
@@ -18,7 +18,11 @@ const authLoginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  keyGenerator: (req) => req.ip ?? "unknown",
+  // express-rate-limit v8 validates custom keyGenerators that touch the IP:
+  // raw req.ip must be wrapped with ipKeyGenerator() so IPv6 clients are
+  // bucketed by /64 subnet instead of the full address, otherwise the server
+  // throws ERR_ERL_KEY_GEN_IPV6 on startup.
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? "unknown"),
   message: {
     error: "Too many login attempts. Please wait 15 minutes before trying again.",
   },

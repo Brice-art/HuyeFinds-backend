@@ -18,14 +18,15 @@ import {
   requireRole,
 } from "../middleware/auth.middleware";
 import { asyncHandler } from "../utils/asyncHandler";
+import { publicCache } from "../middleware/cache.middleware";
 
 export const hubPostsRouter = Router();
 
 // /stats MUST come before /:id — Express matches in registration order,
 // and /:id would otherwise swallow "stats" as if it were an id.
-hubPostsRouter.get("/stats", asyncHandler(getHubPostStats));
+hubPostsRouter.get("/stats", publicCache(60), asyncHandler(getHubPostStats));
 
-hubPostsRouter.get("/", attachUserIfPresent, asyncHandler(listHubPosts));
+hubPostsRouter.get("/", publicCache(30), attachUserIfPresent, asyncHandler(listHubPosts));
 hubPostsRouter.get("/:id", attachUserIfPresent, asyncHandler(getHubPostById));
 hubPostsRouter.patch("/:id", requireAuth, asyncHandler(updateHubPost));
 hubPostsRouter.post("/", requireAuth, asyncHandler(createHubPost));

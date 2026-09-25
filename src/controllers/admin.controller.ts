@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma";
 import { AppError } from "../utils/AppError";
 import { applyPlaceChanges } from "./places.controller";
+import { invalidatePlaceCaches } from "../lib/cache";
 
 const THIRTY_DAYS_IN_MS = 30 * 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_IN_MS = 7 * 24 * 60 * 60 * 1000;
@@ -15,6 +16,8 @@ const placeVerificationEnum = z.enum([
   "VERIFIED",
   "SUSPENDED",
 ]);
+
+const placeModerationEnum = z.enum(["PENDING", "APPROVED", "REJECTED"]);
 
 export async function getAdminOverview(
   _req: Request,
@@ -42,6 +45,7 @@ export async function getAdminOverview(
     pendingClaims,
     openReports,
     pendingEditRequests,
+    pendingPlaces,
     verificationGroups,
     usersCreatedLast30Days,
     usersCreatedPrevious30Days,
@@ -94,6 +98,12 @@ export async function getAdminOverview(
     prisma.placeEditRequest.count({
       where: {
         status: "PENDING",
+      },
+    }),
+
+    prisma.place.count({
+      where: {
+        moderationStatus: "PENDING",
       },
     }),
 
@@ -169,6 +179,7 @@ export async function getAdminOverview(
         author: {
           select: {
             name: true,
+            role: true,
           },
         },
         images: {
@@ -198,6 +209,7 @@ export async function getAdminOverview(
         author: {
           select: {
             name: true,
+            role: true,
           },
         },
         images: {
@@ -254,6 +266,7 @@ export async function getAdminOverview(
         author: {
           select: {
             name: true,
+            role: true,
           },
         },
         images: {
@@ -363,6 +376,7 @@ export async function getAdminOverview(
       pendingClaims,
       openReports,
       pendingEditRequests,
+      pendingPlaces,
       placesByVerification,
     },
 
@@ -530,6 +544,7 @@ export async function removeHubPost(
 const listPlacesQuerySchema = z.object({
   search: z.string().trim().max(120).optional(),
   verification: placeVerificationEnum.optional(),
+  moderation: placeModerationEnum.optional(),
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });
@@ -549,6 +564,7 @@ export async function listAdminPlaces(req: Request, res: Response) {
         }
       : {}),
     ...(q.verification ? { verificationStatus: q.verification } : {}),
+    ...(q.moderation ? { moderationStatus: q.moderation } : {}),
   };
 
   const [items, total] = await Promise.all([
@@ -598,6 +614,46 @@ export async function setPlaceVerification(
         verificationStatus: true,
       },
     });
+
+    invalidatePlaceCaches();
+
+    res.json({ success: true, place });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      throw new AppError("Place not found", 404);
+    }
+
+    throw error;
+  }
+}
+
+const setModerationSchema = z.object({
+  status: placeModerationEnum,
+});
+
+export async function setPlaceModeration(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const { id } = req.params;
+  const { status } = setModerationSchema.parse(req.body);
+
+  try {
+    const place = await prisma.place.update({
+      where: { id },
+      data: { moderationStatus: status },
+      select: {
+        id: true,
+        name: true,
+        moderationStatus: true,
+        isActive: true,
+      },
+    });
+
+    invalidatePlaceCaches();
 
     res.json({ success: true, place });
   } catch (error) {
@@ -679,6 +735,8 @@ export async function approveClaim(req: Request, res: Response) {
       data: { role: "OWNER" },
     }),
   ]);
+
+  invalidatePlaceCaches();
 
   res.json({
     success: true,
@@ -895,6 +953,8 @@ export async function approveEditRequest(req: Request, res: Response) {
       reviewedAt: new Date(),
     },
   });
+
+  invalidatePlaceCaches();
 
   res.json({ success: true, message: "Changes applied to the place" });
 }

@@ -14,6 +14,7 @@ import {
   rejectHubPost,
   removeHubPost,
   resolveReport,
+  setPlaceModeration,
   setPlaceVerification,
 } from "../controllers/admin.controller";
 import { requireAuth, requireRole } from "../middleware/auth.middleware";
@@ -37,6 +38,12 @@ adminRouter.get("/places", asyncHandler(listAdminPlaces));
 adminRouter.patch(
   "/places/:id/verification",
   asyncHandler(setPlaceVerification),
+);
+// Place approval workflow — new submissions are PENDING until an admin
+// approves (APPROVED) or rejects (REJECTED) them here.
+adminRouter.patch(
+  "/places/:id/moderation",
+  asyncHandler(setPlaceModeration),
 );
 
 // Restaurant ownership claims

@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma";
+import { computeIsOpenNow } from "../lib/openNow";
 import { AppError } from "../utils/AppError";
 
 const placeIdSchema = z.object({ placeId: z.string().cuid() });
@@ -28,16 +29,23 @@ export async function listMyFavorites(req: Request, res: Response) {
             where: { isCover: true },
             take: 1,
           },
+          hours: true,
         },
       },
     },
   });
 
+  // Strip the weekly hours (only needed to derive the open/closed flag) so
+  // every saved-place card doesn't carry 7 times rows it won't render.
   res.json({
-    items: favorites.map((f) => ({
-      ...f.place,
-      isFavorited: true,
-    })),
+    items: favorites.map((f) => {
+      const { hours, ...place } = f.place;
+      return {
+        ...place,
+        isFavorited: true,
+        isOpenNow: computeIsOpenNow(hours),
+      };
+    }),
   });
 }
 
